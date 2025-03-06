@@ -1,5 +1,8 @@
 # API Versioning
 
+[Screen 1](./screen-1.jpg)
+[Screen 2](./screen-2.jpg)
+
 This is a prototype specifically aimed at documenting ways to version Minimal APIs 
 with the usage of Microsoft's extensions:
 
@@ -383,8 +386,8 @@ instance, it will be pre-configured with specific settings.
 applied as a type parameter `SwaggerGenOptions`. We also make use of DI to resolve 
 a `IApiVersionDescriptionProvider` which is from `Asp.Versioning.ApiExplorer`. 
 This service can expose to us all registered application versions.
-- The interface requires for `Configure` to be implemented under two overloads (
-a named version and a non-named version). We will leverage our injected versioning 
+- The interface requires for `Configure` to be implemented under two overloads (a 
+named version and a non-named version). We will leverage our injected versioning 
 service to retrieve all the registered versions that we have, and we will start 
 registering new **Swagger Documents**. By creating a new `OpenApiInfo` object  
 we will register new declarations of files to be generated on the Swagger UI that are designed 
