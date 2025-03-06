@@ -26,11 +26,12 @@ public static class WeatherForecastEndpoints
         app.MapGet("weatherforecast", () =>
             {
                 var forecast = Enumerable.Range(1, 1).Select(index =>
-                        new WeatherForecast
+                        new WeatherForecastTwo
                         (
                             DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
                             Random.Shared.Next(-20, 55),
-                            Summaries[Random.Shared.Next(Summaries.Length)]
+                            Summaries[Random.Shared.Next(Summaries.Length)],
+                            "No Extra"
                         ))
                     .ToArray();
                 return forecast;
