@@ -1,7 +1,7 @@
 # API Versioning
 
-[Screen 1](./screen-1.jpg)
-[Screen 2](./screen-2.jpg)
+![First Screenshot](./screen-1.jpg)
+![Second Screenshot](./screen-2.jpg)
 
 This is a prototype specifically aimed at documenting ways to version Minimal APIs 
 with the usage of Microsoft's extensions:
