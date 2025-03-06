@@ -117,7 +117,7 @@ you can see we use this to prefix things and attach versioning.
 
 **_NOTE:_** The `v{apiVersion:apiVersion}` is key for behaviors that are already 
 built for us by the Nuget. This is a route template, and under this specific syntax 
-it integrates with `Asp.Versioning`. In this instance `{apiVersion:apiVersion} is a 
+it integrates with `Asp.Versioning`. In this instance `{apiVersion:apiVersion}` is a 
 **route parameter** where:
 
 - `apiVersion` is a **placeholder** that will be replaced with the actual version 
@@ -194,9 +194,10 @@ public static class WeatherForecastEndpoints
 ```
 If you don't want to clutter the `Program.cs` file even further, you can totally 
 abstract this under another file or pattern. But the idea is there, to decouple 
-versioning concerns from the endpoint declaration outside of it, so that it's not 
-brittle, it leverages interface to have a preconfigured instance to integrate with 
-the basic endpoint route declaration. (This is amazing).
+versioning concerns from the endpoint declaration, and move them elsewhere, so that 
+it's not brittle. It leverages interfaces so that we can easily switch between 
+a bare route builder and a preconfigured instance so that the endpoint declaration 
+code doesn't have to suffer major changes.
 
 ### The final piece of the puzzle
 
@@ -273,5 +274,154 @@ the actual resource with the respective `/api/v1` or whatever.
 
 ## Swagger integration
 
+First of all, out the box, we already have OpenApi integrations. Which is not 
+a UI like swagger, but enables us to hit an endpoint and get a full `json` spec 
+with all endpoints that we have registered under the application: [Reference](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/openapi/aspnetcore-openapi?view=aspnetcore-9.0&tabs=visual-studio%2Cvisual-studio-code)
+
+This prototype has left the OpenApi configured, all that's neccesary is:
+
+```
+builder.Services.AddOpenApi();
+
+app.MapOpenApi();
+```
+
+With these two steps configured one can hit: `https://localhost:<port>/openapi/v1.json` 
+and get a JSON response with the registered endpoints.
+
+### Integrating Swagger
+
+**Swagger** provides us with endpoint discovery and schema mapping, but also with 
+a really useful `UI`. And so we will install it in order to have it at hand.
+
 Now, when integrating with `Swagger`, we have to extend a bit further our original 
-application
+application.
+
+First of all to enable the swagger website at `{baseUrl}/swagger` 
+(e.g., `http://localhost:5062/swagger`). We have to install `SwashBuckle.AspNetCore`.
+
+And from there on, you have to configure both services and Http Request Pipeline:
+
+```
+builder.Services.AddSwaggerGen();
+
+app.UseSwagger(); // Generates OpenAPI JSON
+app.UseSwaggerUI(); // Enables Swagger UI
+```
+
+When working with Minimal APIs specifically `AddOpenApi()` helps with discoverability 
+from each of them, however the `builder.Services.AddEndpointsApiExplorer()` method 
+should be leveraged for Controllers, (it will also discover Minimal APIs though).
+
+- `AddSwaggerGen()` Configures the Swagger generator to create OpenAPI documents 
+for the API we have at hand. In here we can configure API information, descriptions 
+and more.
+- `UseSwagger()` Serves the generated OpenAPI JSON document at a specified endpoint 
+`swagger/v1/swagger.json`. This is the middleware that enables the OpenAPI document 
+available to clients.
+- `UseSwaggerUI()` Enables the Swagger UI, which is a web-based interface to explore 
+and interact with the API documentation. This middleware serves the UI at the default 
+`/swagger` endpoint.
+
+### Extending swagger to further API versions
+
+Now, once we have Swagger being served and scanning our endpoints we will immediately 
+notice something. And that is that API versioning will not be picked up immediately. 
+We will only be supporting the default version, which in our case is `v1`. How 
+can we make swagger pick up on the other versions?
+
+We will make some configuration adjustments.
+
+First of all we will make use of the `ConfigureOptions()` pattern, which is something 
+already built-into .NET and its aim is to centralize configuration of services 
+in a structured and testable way; instead of changing the `config` from a service 
+in-line, e.g., (`builder.Services.AddSwaggerGen(options => { // Change the options here });`).
+
+And so, knowing that the `options` from the previous example statement is of type `SwaggerGenOptions`, 
+if we want to apply a sort of _decorator_ to it to pre-configure it before getting 
+its instance, we can leverage a `IConfigureOptions<SwaggerGenOptions>` class.
+
+```csharp
+builder.Services.ConfigureOptions<ConfigureSwaggerGenOptions>();
+
+// And the class would look like this
+public class ConfigureSwaggerGenOptions : IConfigureNamedOptions<SwaggerGenOptions>
+{
+    private readonly IApiVersionDescriptionProvider _provider;
+
+    public ConfigureSwaggerGenOptions(IApiVersionDescriptionProvider provider)
+    {
+        _provider = provider;
+    }
+    
+    public void Configure(SwaggerGenOptions options)
+    {
+        foreach (ApiVersionDescription description in _provider.ApiVersionDescriptions)
+        {
+            var openApiInfo = new OpenApiInfo
+            {
+                Title = $"ApiVersioning.API v{description.ApiVersion}",
+                Version = description.ApiVersion.ToString(),
+            };
+            
+            options.SwaggerDoc(description.GroupName, openApiInfo);
+        }
+    }
+
+    public void Configure(string? name, SwaggerGenOptions options)
+    {
+        Configure(options);
+    }
+}
+```
+- First, we will leverage the DI container to register our option configurator. 
+This sets the affected configuration type to be pre-configured with the `IConfigureNamedOptions` 
+logic. You can even aggregate tons of different configurators, and they will all 
+be applied in sequence. What this means is that if we want to resolve the configuration 
+instance, it will be pre-configured with specific settings.
+- And if we take a look at the `IConfigureNamedOptions` we will see how it has 
+applied as a type parameter `SwaggerGenOptions`. We also make use of DI to resolve 
+a `IApiVersionDescriptionProvider` which is from `Asp.Versioning.ApiExplorer`. 
+This service can expose to us all registered application versions.
+- The interface requires for `Configure` to be implemented under two overloads (
+a named version and a non-named version). We will leverage our injected versioning 
+service to retrieve all the registered versions that we have, and we will start 
+registering new **Swagger Documents**. By creating a new `OpenApiInfo` object  
+we will register new declarations of files to be generated on the Swagger UI that are designed 
+to aggregate all possible API versions. If you notice, from the entries under `ApiVersionDescriptions` 
+we are making use of a `GroupName` so that we can register different API documents
+(swagger doc), e.g., `/swagger/v1/swagger.json`, `swagger/v2/swagger.json`. And of 
+course, only the relevant endpoints for the relevant version will be shown on the 
+respective manifest.
+
+After we have configured the manifest generation per-version, we will enable 
+the Swagger UI to show a dropdown menu and allow us to switch between the different 
+endpoint definitions:
+
+```csharp
+app.UseSwaggerUI(options =>
+{
+    IReadOnlyList<ApiVersionDescription> descriptions = app.DescribeApiVersions();
+
+    foreach (ApiVersionDescription description in descriptions)
+    {
+        string url = $"/swagger/{description.GroupName}/swagger.json";
+        string name = description.GroupName.ToUpperInvariant();
+        
+        options.SwaggerEndpoint(url, name);
+    }
+}); // Enables Swagger UI
+```
+This code leverages the api versions descriptions that should be resolvable thanks 
+to all our configurations, and after iterating them again, we simply configure 
+the entries for the dropdown in the upper right corner of Swagger, and we tie 
+that into the generated swagger doc manifests (that are also per version). By 
+calling `options.SwaggerEndpoint(url, name)` in the loop we are registering the 
+two versions to be shown and to be accessed dynamically.
+
+## Extra Notes
+
+[Reference](https://code-maze.com/aspnetcore-add-global-route-prefix/). There's 
+an argument to be made to hide from the consumers the idea of versioning or 
+other prefixes. Such as a middleware can add the `/api/` or even versioning 
+prefixes for the request. An interesting take for sure.
